@@ -1,0 +1,6 @@
+<launch>
+    <include file="$(find mavros)/launch/px4.launch"/>
+    <node pkg="lecture3" type="environment.py" name="environment" />
+    <node pkg="lecture3" type="plan_env.py" name="plan_env"/>
+    <node pkg="rviz" type="rviz" name="test_show" args="-d $(find lecture3)/config/outdoor.rviz"/>
+</launch>
