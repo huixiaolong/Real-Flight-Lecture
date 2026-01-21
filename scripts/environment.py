@@ -115,29 +115,26 @@ def pos2id(pos,origin,voxelsize):
     idx = floor((x-x0)/voxelsize)
     idy = floor((y-y0)/voxelsize)
     # x轴长度20，分辨率0.1，每行200个格子，左下角索引是0，从左到有，从下到上索引增加，看运动规划教材图6.6
-    return idy*200+idx
+    # return idy*200+idx
+    return idx,idy
 
 def id2pos(id,origin,voxelsize):
     return (id+0.5)*voxelsize+origin
     
 def initCamera():
-    use435 = True
-    # use265 = True
-    # useIMU = True
     context = rs.context()    
-    if use435:
-        width = 640
-        height = 480
-        pipeline = rs.pipeline(context)
-        config = rs.config()
-        config.enable_device('317222070681')
-        config.enable_stream(rs.stream.depth, width, height, rs.format.z16, 30)
-        config.enable_stream(rs.stream.color, width, height, rs.format.rgb8, 30)
-        # config.enable_stream(rs.stream.accel, rs.format.motion_xyz32f, 250)
-        profile = pipeline.start(config)
-        depth_sensor = profile.get_device().first_depth_sensor()
-        depth_scale = depth_sensor.get_depth_scale()
-        print("Depth Scale is: ", depth_scale)  
+    width = 640
+    height = 480
+    pipeline = rs.pipeline(context)
+    config = rs.config()
+    config.enable_device('317222070681')
+    config.enable_stream(rs.stream.depth, width, height, rs.format.z16, 30)
+    config.enable_stream(rs.stream.color, width, height, rs.format.rgb8, 30)
+    # config.enable_stream(rs.stream.accel, rs.format.motion_xyz32f, 250)
+    profile = pipeline.start(config)
+    depth_sensor = profile.get_device().first_depth_sensor()
+    depth_scale = depth_sensor.get_depth_scale()
+    print("Depth Scale is: ", depth_scale)  
         
     # 对齐彩色和深度   
     align_to = rs.stream.color
@@ -213,11 +210,11 @@ def initMap():
     gridmap.header.stamp = rospy.Time.now()
     #width对应x轴，height对应y轴 （idx,idy）在一维数组中的索引是 idy*width+idx
     gridmap.info.width = 200
-    gridmap.info.height = 400
+    gridmap.info.height = 200
     gridmap.info.resolution = 0.1
     gridmap.info.origin = Pose()
     gridmap.info.origin.position.x = -10.0
-    gridmap.info.origin.position.y = -20.0
+    gridmap.info.origin.position.y = -10.0
     gridmap.info.origin.position.z = 0.0
     gridmap.info.origin.orientation.w = 1.0
     gridmap.info.origin.orientation.x = 0.0
@@ -239,6 +236,9 @@ if __name__=='__main__':
     motion = tf.TransformBroadcaster()
     
     gridmap = initMap()
+    sx,sy = gridmap.info.origin.position.x,gridmap.info.origin.position.y
+    xsize = gridmap.info.width
+    ysize = gridmap.info.height
     d435,align,depth_scale = initCamera()
     
     raycast_num = 0
@@ -260,14 +260,13 @@ if __name__=='__main__':
         # https://www.intelrealsense.com/zh-hans/depth-camera-d435i/  相机参数
         # 点云越稠密，占据结果越稳定，但处理时间越长。
         # 对于python实现，建议水平和垂直像素步进为4或8。
-        for x in range(0,width,4):
-            for y in range(0,height,4):
+        for x in range(0,width,16):
+            for y in range(0,height,16):
                 xyz = np.zeros(3,float)
                 xyz[0] = depth[y,x].astype(float)*depth_scale
                 # 去掉没有深度的点或深度大于6的点，防止边界溢出，目前地图是（20,40）大
                 if xyz[0]<0.3 or xyz[0]>6:
                     continue
-
                 # 转换点云坐标从相机坐标系（右下前）到地图坐标系（前左上）
                 xyz[1] = -(x-cx)/fx*xyz[0]
                 xyz[2] = -(y-cy)/fy*xyz[0]
@@ -293,10 +292,15 @@ if __name__=='__main__':
         pub_cloud.publish(msg)
         m,p = drawRayAndGrid()
         for pt in whp:
-            id = pos2id(pt,(-10,-20),0.1)
+            idx,idy = pos2id(pt,(sx,sy),0.1)
+            # 如果点云超出边界，重新初始化新的局部地图
+            if idx>=xsize or idy>=ysize or idx<0 or idy<0:
+                print('beyond region,update map')
+                continue
+            id = idy*xsize+idx
             # 有深度的点，才更新相机到3D点之间的网格，是不是有问题？射线尽头没有实体就不更新了？
             setcache(id,1)
-            raycast(tw,pt,np.array([-10,-20,0]),0.1)
+            raycast(tw,pt,np.array([sx,sy,0]),0.1)
             point1 = Point(tw[0],tw[1],tw[2])
             point2 = Point(pt[0],pt[1],pt[2])
             m.points.append(point1)
